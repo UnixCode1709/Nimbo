@@ -194,7 +194,6 @@ local environment files
 compiled installers
 ```
 
-Исполняемый файл появится в папке `dist/` или `dist_electron/`.
 This keeps the repository clean and avoids storing unnecessary generated files.
 
 ---
@@ -209,9 +208,6 @@ Nimbo is my first major software project and a project I use to improve my devel
 
 ---
 
-## 📋 Системные требования
-- **OS**: Windows 10 / 11
-- **Зависимости**: `yt-dlp` и `ffmpeg` (устанавливаются автоматически через `winget` или системные пакетировщики).
 ## ⚠️ Disclaimer
 
 Nimbo is intended to be used only for content that you are legally permitted to download.
