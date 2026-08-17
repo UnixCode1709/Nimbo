@@ -1,0 +1,125 @@
+# =========================
+# Dependencies
+# =========================
+
+node_modules/
+
+
+# =========================
+# Build outputs
+# =========================
+
+dist/
+dist_electron/
+dist_installer/
+out/
+
+
+# =========================
+# Backups
+# =========================
+
+src_v1_backup/
+*_backup/
+*_backup.*
+
+
+# =========================
+# Logs
+# =========================
+
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+
+# =========================
+# Downloaded media / temporary files
+# =========================
+
+*.mp3
+*.mp4
+*.mkv
+*.webm
+*.m4a
+*.wav
+*.ogg
+
+*.part
+*.mp4.part
+*.webm.part
+
+*.tmp
+*.temp
+
+
+# =========================
+# Environment variables / secrets
+# =========================
+
+.env
+.env.*
+!.env.example
+
+
+# =========================
+# Editors / IDE
+# =========================
+
+.vscode/
+.idea/
+
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
+*.swo
+
+
+# =========================
+# Operating system files
+# =========================
+
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+
+# =========================
+# Cache
+# =========================
+
+.cache/
+.temp/
+.tmp/
+
+
+# =========================
+# Electron / packaging
+# =========================
+
+*.blockmap
+
+builder-debug.yml
+builder-effective-config.yaml
+
+
+# =========================
+# Installer files
+# =========================
+
+*.exe
+*.msi
+
+
+# =========================
+# Misc
+# =========================
+
+*.bak
+*.old
