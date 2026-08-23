@@ -39,6 +39,30 @@ interface VideoState {
   statusText: string;
 }
 
+interface QualityOption {
+  value: string;
+  tag: string;
+  label: string;
+  isUltra?: boolean;
+}
+
+const getQualityOption = (q: string): QualityOption => {
+  if (q === '2160p') return { value: '2160p', tag: '4K', label: '4K Ultra HD', isUltra: true };
+  if (q === '1440p') return { value: '1440p', tag: '2K', label: '2K Quad HD', isUltra: true };
+  if (q === '1080p') return { value: '1080p', tag: '1080p', label: 'Full HD' };
+  if (q === '720p') return { value: '720p', tag: '720p', label: 'HD 720p' };
+  if (q === '480p') return { value: '480p', tag: '480p', label: 'SD 480p' };
+  if (q === '360p') return { value: '360p', tag: '360p', label: '360p Lite' };
+  return { value: q, tag: q, label: q };
+};
+
+const AUDIO_BITRATES = [
+  { value: '320', tag: '320k', label: '320 kbps', desc: 'HQ звук' },
+  { value: '256', tag: '256k', label: '256 kbps', desc: 'Высокое' },
+  { value: '192', tag: '192k', label: '192 kbps', desc: 'Стандарт' },
+  { value: '128', tag: '128k', label: '128 kbps', desc: 'Компакт' }
+];
+
 export function App() {
   const [url, setUrl] = useState('');
   const [format, setFormat] = useState<FormatType>('mp4');
@@ -61,13 +85,27 @@ export function App() {
 
   // Automatically fetch video or playlist details & available qualities
   useEffect(() => {
-    const fetchInfo = async () => {
-      const trimmed = url.trim();
-      if (!trimmed || (!trimmed.includes('youtube.com/') && !trimmed.includes('youtu.be/'))) {
-        setVideoInfo(null);
-        return;
-      }
+    const trimmed = url.trim();
+    if (!trimmed) {
+      setVideoInfo(null);
+      setVideoState({
+        url: '',
+        format: 'mp4',
+        quality: '1080p',
+        isDownloading: false,
+        progress: 0,
+        status: 'idle',
+        statusText: '',
+      });
+      return;
+    }
 
+    if (!trimmed.includes('youtube.com/') && !trimmed.includes('youtu.be/')) {
+      setVideoInfo(null);
+      return;
+    }
+
+    const fetchInfo = async () => {
       setIsFetchingInfo(true);
       try {
         const firstUrl = trimmed.split('\n')[0].trim();
@@ -80,7 +118,7 @@ export function App() {
           const data: VideoInfo = await res.json();
           setVideoInfo(data);
           if (data.availableQualities && data.availableQualities.length > 0) {
-            setQuality(data.availableQualities[0]); // Select max available quality automatically
+            setQuality(prev => (data.availableQualities!.includes(prev) ? prev : data.availableQualities![0]));
           }
         } else {
           setVideoInfo(null);
@@ -274,7 +312,22 @@ export function App() {
         )}
         <Play className="input-icon" size={20} />
         {url && (
-          <button className="clear-btn" onClick={() => { setUrl(''); setVideoInfo(null); }}>
+          <button 
+            className="clear-btn" 
+            onClick={() => { 
+              setUrl(''); 
+              setVideoInfo(null);
+              setVideoState({
+                url: '',
+                format: 'mp4',
+                quality: '1080p',
+                isDownloading: false,
+                progress: 0,
+                status: 'idle',
+                statusText: '',
+              });
+            }}
+          >
             <X size={16} />
           </button>
         )}
@@ -298,73 +351,101 @@ export function App() {
               style={{ width: '130px', height: '80px', borderRadius: '14px', objectFit: 'cover', border: '1px solid var(--border-holo)' }}
             />
           ) : (
-            <div style={{ width: '130px', height: '80px', borderRadius: '14px', background: 'var(--iridescent-btn)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <ListVideo size={32} color="#121216" />
+            <div style={{ width: '130px', height: '80px', borderRadius: '14px', background: 'rgba(255,255,255,0.05)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <ListVideo size={28} color="var(--iridescent-purple)" />
             </div>
           )}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem', overflow: 'hidden' }}>
-            <span style={{ fontWeight: 700, fontSize: '1rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+
+          <div style={{ flex: 1, overflow: 'hidden' }}>
+            <h4 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
               {videoInfo.title}
-            </span>
-            <div style={{ display: 'flex', gap: '1rem', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
-              <span style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                <User size={14} color="var(--iridescent-purple)" /> {videoInfo.uploader}
-              </span>
+            </h4>
+            <div style={{ display: 'flex', gap: '1rem', marginTop: '0.4rem', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
               {videoInfo.isPlaylist ? (
-                <span style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', color: 'var(--iridescent-yellow)', fontWeight: 600 }}>
-                  <Layers size={14} /> Плейлист: {videoInfo.itemCount} элементов
-                </span>
+                <>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                    <Layers size={13} color="var(--iridescent-purple)" /> {videoInfo.itemCount} видео в плейлисте
+                  </span>
+                </>
               ) : (
-                <span style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                  <Clock size={14} color="var(--iridescent-blue)" /> {videoInfo.duration}
-                </span>
+                <>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                    <User size={13} /> {videoInfo.uploader}
+                  </span>
+                  {videoInfo.duration && (
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                      <Clock size={13} /> {videoInfo.duration}
+                    </span>
+                  )}
+                </>
               )}
             </div>
           </div>
         </div>
       )}
 
-      {/* Options Selection Grid: Displayed ONLY after video info is loaded */}
+      {/* Quality Selection - Ergonomic & Integrated into the Holographic UI */}
       {videoInfo && !isFetchingInfo && (
-        <div className="options-grid" style={{ gridTemplateColumns: '1fr', marginBottom: '1.5rem' }}>
+        <div className="quality-section">
+          <div className="quality-header">
+            <div className="quality-title-wrapper">
+              {format === 'mp4' ? (
+                <>
+                  <Video size={15} color="var(--iridescent-purple)" />
+                  <span>{videoInfo.isPlaylist ? 'Качество для плейлиста' : 'Доступное качество видео'}</span>
+                </>
+              ) : (
+                <>
+                  <Music size={15} color="var(--iridescent-blue)" />
+                  <span>Битрейт звука MP3</span>
+                </>
+              )}
+            </div>
+            <span className="quality-pill-badge">
+              {format === 'mp4' ? quality : `${audioBitrate} kbps`}
+            </span>
+          </div>
+
           {format === 'mp4' ? (
-            <div className="option-card">
-              <span className="option-label">Выберите качество видео (из доступных)</span>
-              <select 
-                className="option-select" 
-                value={quality}
-                onChange={(e) => setQuality(e.target.value)}
-              >
-                {videoInfo.availableQualities && videoInfo.availableQualities.length > 0 ? (
-                  videoInfo.availableQualities.map((q) => (
-                    <option key={q} value={q}>
-                      {q === '2160p' ? '4K Ultra HD (2160p)' :
-                       q === '1440p' ? '2K Quad HD (1440p)' :
-                       q === '1080p' ? 'Full HD (1080p)' :
-                       q === '720p' ? 'HD (720p)' :
-                       q === '480p' ? 'SD (480p)' :
-                       q === '360p' ? '360p (SD)' :
-                       `${q} (Доступно)`}
-                    </option>
-                  ))
-                ) : (
-                  <option value="1080p">Full HD (1080p)</option>
-                )}
-              </select>
+            <div className="quality-grid">
+              {(videoInfo.availableQualities && videoInfo.availableQualities.length > 0 
+                ? videoInfo.availableQualities 
+                : ['1080p', '720p', '480p', '360p']
+              ).map((q) => {
+                const opt = getQualityOption(q);
+                const isSelected = quality === opt.value;
+                return (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    className={`quality-card-btn ${isSelected ? 'active' : ''} ${opt.isUltra ? 'ultra' : ''}`}
+                    onClick={() => setQuality(opt.value)}
+                  >
+                    <span className="quality-badge">{opt.tag}</span>
+                    <span className="quality-name">{opt.label}</span>
+                  </button>
+                );
+              })}
             </div>
           ) : (
-            <div className="option-card">
-              <span className="option-label">Битрейт Аудио</span>
-              <select 
-                className="option-select" 
-                value={audioBitrate}
-                onChange={(e) => setAudioBitrate(e.target.value)}
-              >
-                <option value="320">320 kbps (Максимальное качество)</option>
-                <option value="256">256 kbps (Высокое)</option>
-                <option value="192">192 kbps (Стандартное)</option>
-                <option value="128">128 kbps (Экономия места)</option>
-              </select>
+            <div className="quality-grid">
+              {AUDIO_BITRATES.map((item) => {
+                const isSelected = audioBitrate === item.value;
+                return (
+                  <button
+                    key={item.value}
+                    type="button"
+                    className={`quality-card-btn ${isSelected ? 'active' : ''}`}
+                    onClick={() => setAudioBitrate(item.value)}
+                  >
+                    <span className="quality-badge">{item.tag}</span>
+                    <div className="quality-audio-info">
+                      <span className="quality-name">{item.label}</span>
+                      <span className="quality-desc">{item.desc}</span>
+                    </div>
+                  </button>
+                );
+              })}
             </div>
           )}
         </div>
@@ -389,8 +470,8 @@ export function App() {
         )}
       </button>
 
-      {/* Progress & Status Indicator */}
-      {videoState.status !== 'idle' && (
+      {/* Progress & Status Indicator - strictly hidden when input URL is cleared */}
+      {videoState.status !== 'idle' && url.trim() && (
         <div className="progress-card">
           <div className="progress-header">
             <div className="video-info">
