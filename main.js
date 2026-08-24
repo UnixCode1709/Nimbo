@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, Notification, shell } = require('electron');
+const { app, BrowserWindow, dialog, Notification, shell, clipboard, globalShortcut } = require('electron');
 const path = require('path');
 const express = require('express');
 const cors = require('cors');
@@ -38,97 +38,128 @@ expressApp.post('/api/select-folder', async (req, res) => {
 });
 
 
-// Helper: if URL has a specific video ID (v=) AND playlist params,
+// Helper: if URL has a specific video ID (v= or youtu.be/ID) AND playlist/radio params,
 // strip the playlist params so yt-dlp downloads only the single video.
-// Pure playlist URLs (no v=) are left as-is for full playlist downloads.
+// Pure playlist URLs (no specific video) are left as-is for full playlist downloads.
 function cleanVideoUrl(rawUrl) {
   try {
-    const u = new URL(rawUrl.trim());
-    if (u.searchParams.has('v') && u.searchParams.has('list')) {
+    const trimmed = rawUrl.trim();
+    const u = new URL(trimmed);
+    
+    const isYouTuBe = u.hostname.includes('youtu.be') && u.pathname.length > 1;
+    const isWatch = u.searchParams.has('v');
+    
+    if ((isWatch || isYouTuBe) && u.searchParams.has('list')) {
       u.searchParams.delete('list');
       u.searchParams.delete('index');
       u.searchParams.delete('start_radio');
       u.searchParams.delete('pp');
-      console.log(`[Nimbo] Stripped playlist params → ${u.toString()}`);
+      u.searchParams.delete('si');
+      console.log(`[Nimbo] Stripped playlist/radio params → ${u.toString()}`);
       return u.toString();
     }
-    return rawUrl.trim();
+    return trimmed;
   } catch {
     return rawUrl.trim();
   }
 }
 
-// Fetch metadata endpoint + available resolutions extraction
-expressApp.post('/api/info', (req, res) => {
+// YouTube Client Fallback Cascade (bypasses bot challenges, SABR, and login requirements while providing full 1080p/4K qualities)
+const YOUTUBE_CLIENT_CASCADE = [
+  'visionos',
+  'android;player_skip=configs',
+  'ios;player_skip=configs',
+  'tv;player_skip=configs',
+  'mweb;player_skip=configs'
+];
+
+// Fetch metadata endpoint + available resolutions extraction with automatic cascade
+expressApp.post('/api/info', async (req, res) => {
   const { url } = req.body;
   if (!url) return res.status(400).json({ error: 'URL не указан' });
 
   const cleanUrl = cleanVideoUrl(url);
 
-  const args = [
-    '-J',
-    '--no-warnings',
-    cleanUrl
-  ];
+  const fetchInfoWithClient = (clientConfig) => {
+    return new Promise((resolve) => {
+      const args = ['-J', '--no-warnings'];
+      if (clientConfig) {
+        args.push('--extractor-args', `youtube:player_client=${clientConfig}`);
+      }
+      args.push(cleanUrl);
 
-  const proc = spawn(YT_DLP_PATH, args);
-  let stdoutData = '';
-  let stderrData = '';
+      const proc = spawn(YT_DLP_PATH, args);
+      let stdoutData = '';
+      let stderrData = '';
 
-  proc.stdout.on('data', (data) => stdoutData += data.toString());
-  proc.stderr.on('data', (data) => stderrData += data.toString());
+      proc.stdout.on('data', (data) => stdoutData += data.toString());
+      proc.stderr.on('data', (data) => stderrData += data.toString());
 
-  proc.on('close', (code) => {
-    if (code === 0 && stdoutData) {
-      try {
-        const info = JSON.parse(stdoutData);
-        if (info._type === 'playlist' && info.entries) {
-          res.json({
-            isPlaylist: true,
-            title: info.title || 'YouTube Playlist',
-            uploader: info.uploader || info.channel || 'YouTube',
-            itemCount: info.entries.length,
-            thumbnail: info.entries[0]?.thumbnails?.[0]?.url || '',
-            availableQualities: ['2160p', '1440p', '1080p', '720p', '480p']
-          });
-        } else {
-          // Extract real available video heights/resolutions
-          const availableHeights = new Set();
-          if (info.formats && Array.isArray(info.formats)) {
-            info.formats.forEach((f) => {
-              if (f.height && typeof f.height === 'number') {
-                availableHeights.add(f.height);
-              }
-            });
-          }
+      proc.on('close', (code) => {
+        resolve({ code, stdoutData, stderrData });
+      });
+    });
+  };
 
-          const sortedHeights = Array.from(availableHeights).sort((a, b) => b - a);
-          const availableQualities = sortedHeights
-            .filter(h => h >= 144)
-            .map(h => `${h}p`);
+  let result = null;
+  for (const client of YOUTUBE_CLIENT_CASCADE) {
+    result = await fetchInfoWithClient(client);
+    if (result.code === 0 && result.stdoutData) {
+      break;
+    }
+    console.log(`[Nimbo] Info fetch failed with client ${client}, trying next in cascade...`);
+  }
 
-          const finalQualities = availableQualities.length ? availableQualities : ['1080p', '720p', '480p', '360p'];
-
-          res.json({
-            isPlaylist: false,
-            title: info.title || 'YouTube Video',
-            thumbnail: info.thumbnail || (info.thumbnails && info.thumbnails.length ? info.thumbnails[info.thumbnails.length - 1].url : ''),
-            uploader: info.uploader || info.channel || 'YouTube',
-            duration: info.duration_string || `${Math.floor((info.duration || 0) / 60)}:${((info.duration || 0) % 60).toString().padStart(2, '0')}`,
-            availableQualities: finalQualities
+  if (result && result.code === 0 && result.stdoutData) {
+    try {
+      const info = JSON.parse(result.stdoutData);
+      if (info._type === 'playlist' && info.entries) {
+        return res.json({
+          isPlaylist: true,
+          title: info.title || 'YouTube Playlist',
+          uploader: info.uploader || info.channel || 'YouTube',
+          itemCount: info.entries.length,
+          thumbnail: info.entries[0]?.thumbnails?.[0]?.url || '',
+          availableQualities: ['2160p', '1440p', '1080p', '720p', '480p']
+        });
+      } else {
+        // Extract real available video heights/resolutions
+        const availableHeights = new Set();
+        if (info.formats && Array.isArray(info.formats)) {
+          info.formats.forEach((f) => {
+            if (f.height && typeof f.height === 'number') {
+              availableHeights.add(f.height);
+            }
           });
         }
-      } catch (e) {
-        res.status(500).json({ error: 'Ошибка парсинга метаданных' });
+
+        const sortedHeights = Array.from(availableHeights).sort((a, b) => b - a);
+        const availableQualities = sortedHeights
+          .filter(h => h >= 144)
+          .map(h => `${h}p`);
+
+        const finalQualities = availableQualities.length ? availableQualities : ['1080p', '720p', '480p', '360p'];
+
+        return res.json({
+          isPlaylist: false,
+          title: info.title || 'YouTube Video',
+          thumbnail: info.thumbnail || (info.thumbnails && info.thumbnails.length ? info.thumbnails[info.thumbnails.length - 1].url : ''),
+          uploader: info.uploader || info.channel || 'YouTube',
+          duration: info.duration_string || `${Math.floor((info.duration || 0) / 60)}:${((info.duration || 0) % 60).toString().padStart(2, '0')}`,
+          availableQualities: finalQualities
+        });
       }
-    } else {
-      const isUnavailable = stderrData.includes('unavailable') || stderrData.includes('Private') || stderrData.includes('deleted');
-      const errorMsg = isUnavailable 
-        ? 'Видео недоступно или удалено с YouTube' 
-        : 'Не удалось получить сведения о видео. Проверьте ссылку.';
-      res.status(400).json({ error: errorMsg });
+    } catch (e) {
+      return res.status(500).json({ error: 'Ошибка парсинга метаданных' });
     }
-  });
+  } else {
+    const stderrText = result ? result.stderrData : '';
+    const isUnavailable = stderrText.includes('unavailable') || stderrText.includes('Private') || stderrText.includes('deleted');
+    const errorMsg = isUnavailable 
+      ? 'Видео недоступно или удалено с YouTube' 
+      : 'Не удалось получить сведения о видео. Проверьте ссылку.';
+    return res.status(400).json({ error: errorMsg });
+  }
 });
 
 expressApp.post('/api/download', (req, res) => {
@@ -155,11 +186,18 @@ expressApp.post('/api/download', (req, res) => {
     '--retry-sleep', 'linear=1::2',
     '--socket-timeout', '30',
     '--ffmpeg-location', FFMPEG_DIR,
+    '--extractor-args', 'youtube:player_client=visionos,android;player_skip=configs',
     '-o', path.join(targetDir, '%(title)s.%(ext)s')
   ];
 
   if (format === 'mp3') {
-    args.push('-x', '--audio-format', 'mp3', '--audio-quality', `${audioBitrate || 320}k`);
+    args.push(
+      '-x', 
+      '--audio-format', 'mp3', 
+      '--audio-quality', `${audioBitrate || 320}k`,
+      '--embed-thumbnail',
+      '--embed-metadata'
+    );
   } else {
     // Extract purely digits from quality (e.g. '1080p', '1080', 'Full HD (1080p)' -> '1080')
     const match = String(quality || '').match(/\d+/);
@@ -202,8 +240,14 @@ expressApp.post('/api/download', (req, res) => {
       } else if (line.includes('[ExtractAudio]') || line.includes('[Merger]')) {
         sendEvent({
           status: 'processing',
-          progress: 95,
+          progress: 92,
           message: 'Конвертация и сведение в файл...'
+        });
+      } else if (line.includes('[EmbedThumbnail]') || line.includes('[Metadata]')) {
+        sendEvent({
+          status: 'processing',
+          progress: 98,
+          message: 'Вшивание обложки и аудио-тегов в MP3...'
         });
       } else if (line.includes('[download] Destination:')) {
         const dest = line.replace('[download] Destination:', '').trim();
@@ -256,12 +300,16 @@ expressApp.post('/api/download', (req, res) => {
         friendlyError = 'Видео недоступно — возможно удалено или заблокировано в вашем регионе.';
       } else if (fullStderr.includes('Private video')) {
         friendlyError = 'Это приватное видео — автор закрыл доступ.';
-      } else if (fullStderr.includes('Sign in') || fullStderr.includes('age')) {
-        friendlyError = 'Видео требует авторизации (возрастное ограничение 18+).';
+      } else if (fullStderr.includes('confirm you’re not a bot') || fullStderr.includes("confirm you're not a bot") || (fullStderr.includes('Sign in') && fullStderr.includes('bot'))) {
+        friendlyError = 'YouTube временно запросил проверку на бота (Anti-Bot Check) для этого ролика. Попробуйте повторить через 2-3 минуты или сменить сеть/VPN.';
+      } else if (fullStderr.includes('confirm your age') || fullStderr.includes('age-restricted') || (fullStderr.includes('Sign in') && fullStderr.includes('age'))) {
+        friendlyError = 'Видео с возрастным ограничением (18+).';
+      } else if (fullStderr.includes('Sign in')) {
+        friendlyError = 'YouTube требует авторизации для доступа к этому видео.';
       } else if (fullStderr.includes('HTTP Error 403')) {
         friendlyError = 'YouTube заблокировал запрос (403). Попробуйте снова через несколько секунд.';
       } else if (fullStderr.includes('HTTP Error 429')) {
-        friendlyError = 'Слишком много запросов — YouTube временно заблокировал скачивание. Подождите пару минут.';
+        friendlyError = 'Слишком много запросов — YouTube временно ограничил скачивание. Подождите пару минут.';
       } else if (fullStderr.includes('network') || fullStderr.includes('timeout') || fullStderr.includes('Connection')) {
         friendlyError = 'Ошибка сети — проверьте подключение к интернету и попробуйте снова.';
       } else if (fullStderr.includes('Requested format is not available')) {
@@ -313,6 +361,15 @@ function createWindow() {
     }
   });
 
+  mainWindow.on('focus', () => {
+    try {
+      const text = clipboard.readText();
+      if (text && (text.includes('youtube.com/') || text.includes('youtu.be/'))) {
+        mainWindow.webContents.send('clipboard-url-detected', text.trim());
+      }
+    } catch (e) {}
+  });
+
   if (process.env.NODE_ENV === 'development' || !app.isPackaged) {
     mainWindow.loadURL('http://localhost:5173');
   } else {
@@ -325,6 +382,28 @@ app.whenReady().then(() => {
     app.setAppUserModelId('com.nimbo.downloader');
   }
   createWindow();
+
+  try {
+    globalShortcut.register('CommandOrControl+Shift+D', () => {
+      try {
+        const text = clipboard.readText();
+        if (text && (text.includes('youtube.com/') || text.includes('youtu.be/'))) {
+          if (mainWindow) {
+            if (mainWindow.isMinimized()) mainWindow.restore();
+            mainWindow.show();
+            mainWindow.focus();
+            mainWindow.webContents.send('clipboard-url-detected', text.trim());
+          }
+        }
+      } catch (e) {}
+    });
+  } catch (e) {}
+});
+
+app.on('will-quit', () => {
+  try {
+    globalShortcut.unregisterAll();
+  } catch (e) {}
 });
 
 app.on('window-all-closed', () => {

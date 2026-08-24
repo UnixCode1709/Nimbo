@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { 
   Download, 
   Video, 
@@ -14,12 +14,28 @@ import {
   Sparkles,
   ListVideo,
   Layers,
-  Globe
+  Globe,
+  Clipboard,
+  Palette
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
 type FormatType = 'mp4' | 'mp3';
 type Language = 'ru' | 'en';
+type Theme = 'obsidian-holo' | 'pearl-aurora' | 'midnight-cyber' | 'velvet-nebula' | 'emerald-minimal';
+
+interface ThemeInfo {
+  id: Theme;
+  color: string;
+}
+
+const THEMES_LIST: ThemeInfo[] = [
+  { id: 'obsidian-holo', color: '#D4B2FF' },
+  { id: 'pearl-aurora', color: '#9333EA' },
+  { id: 'midnight-cyber', color: '#00F0FF' },
+  { id: 'velvet-nebula', color: '#C77DFF' },
+  { id: 'emerald-minimal', color: '#34D399' },
+];
 
 const TRANSLATIONS = {
   ru: {
@@ -40,6 +56,16 @@ const TRANSLATIONS = {
     settingLabel: 'Настройка',
     unknownTitle: 'Загрузка...',
     serverError: 'Ошибка связи с бэкенд-сервером',
+    btnPaste: 'Вставить из буфера',
+    clipboardToast: 'Ссылка обнаружена в буфере и вставлена!',
+    themeLabel: 'Тема оформления',
+    themes: {
+      'obsidian-holo': 'Obsidian (Тёмная)',
+      'pearl-aurora': 'Pearl (Светлая)',
+      'midnight-cyber': 'Midnight (Киберпанк)',
+      'velvet-nebula': 'Velvet (Небула)',
+      'emerald-minimal': 'Emerald (Изумруд)'
+    } as Record<Theme, string>,
     audioBitrateDesc: {
       '320': 'HQ звук',
       '256': 'Высокое',
@@ -73,6 +99,16 @@ const TRANSLATIONS = {
     settingLabel: 'Quality',
     unknownTitle: 'Loading...',
     serverError: 'Failed to connect to backend server',
+    btnPaste: 'Paste from clipboard',
+    clipboardToast: 'Link detected in clipboard and pasted!',
+    themeLabel: 'Theme',
+    themes: {
+      'obsidian-holo': 'Obsidian (Dark)',
+      'pearl-aurora': 'Pearl (Light)',
+      'midnight-cyber': 'Midnight (Cyber)',
+      'velvet-nebula': 'Velvet (Nebula)',
+      'emerald-minimal': 'Emerald (Minimal)'
+    } as Record<Theme, string>,
     audioBitrateDesc: {
       '320': 'HQ Audio',
       '256': 'High',
@@ -137,6 +173,48 @@ export function App() {
   });
   const t = TRANSLATIONS[lang];
 
+  const [theme, setTheme] = useState<Theme>(() => {
+    const saved = localStorage.getItem('nimbo_theme') as Theme;
+    return saved || 'obsidian-holo';
+  });
+  const [isThemeMenuOpen, setIsThemeMenuOpen] = useState(false);
+  const themeMenuRef = useRef<HTMLDivElement>(null);
+  const [isNimbiHappy, setIsNimbiHappy] = useState(false);
+
+  const handleNimbiClick = () => {
+    setIsNimbiHappy(true);
+    try {
+      confetti({
+        particleCount: 16,
+        spread: 45,
+        origin: { y: 0.22 },
+        colors: ['#FFD1ED', '#D4B2FF', '#A2E3FF', '#FFF3C4'],
+        scalar: 0.75,
+        ticks: 100,
+        shapes: ['star']
+      });
+    } catch (e) {}
+
+    setTimeout(() => {
+      setIsNimbiHappy(false);
+    }, 1400);
+  };
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('nimbo_theme', theme);
+  }, [theme]);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (themeMenuRef.current && !themeMenuRef.current.contains(event.target as Node)) {
+        setIsThemeMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
   const [url, setUrl] = useState('');
   const [format, setFormat] = useState<FormatType>('mp4');
   const [quality, setQuality] = useState('1080p');
@@ -145,6 +223,9 @@ export function App() {
   
   const [videoInfo, setVideoInfo] = useState<VideoInfo | null>(null);
   const [isFetchingInfo, setIsFetchingInfo] = useState(false);
+
+  const [toastMsg, setToastMsg] = useState<string | null>(null);
+  const [lastPastedUrl, setLastPastedUrl] = useState<string>('');
 
   const [videoState, setVideoState] = useState<VideoState>({
     url: '',
@@ -155,6 +236,75 @@ export function App() {
     status: 'idle',
     statusText: '',
   });
+
+  const showToast = (msg: string) => {
+    setToastMsg(msg);
+    setTimeout(() => setToastMsg(null), 3200);
+  };
+
+  const handleAutoPaste = (clipText: string) => {
+    const trimmed = (clipText || '').trim();
+    if (!trimmed) return;
+    if (!trimmed.includes('youtube.com/') && !trimmed.includes('youtu.be/')) return;
+    if (trimmed === url.trim() || trimmed === lastPastedUrl) return;
+
+    setLastPastedUrl(trimmed);
+    setUrl(trimmed);
+    showToast(t.clipboardToast);
+  };
+
+  const handleManualPaste = async () => {
+    try {
+      let text = '';
+      if ((window as any).require) {
+        const { clipboard } = (window as any).require('electron');
+        text = clipboard.readText();
+      } else if (navigator.clipboard && navigator.clipboard.readText) {
+        text = await navigator.clipboard.readText();
+      }
+      if (text) {
+        const trimmed = text.trim();
+        setUrl(trimmed);
+        setLastPastedUrl(trimmed);
+        showToast(t.clipboardToast);
+      }
+    } catch (e) {
+      console.error('Failed to read clipboard', e);
+    }
+  };
+
+  useEffect(() => {
+    // Electron IPC listener for window focus & global hotkey Ctrl+Shift+D
+    if ((window as any).require) {
+      try {
+        const { ipcRenderer } = (window as any).require('electron');
+        const listener = (_: any, clipUrl: string) => {
+          handleAutoPaste(clipUrl);
+        };
+        ipcRenderer.on('clipboard-url-detected', listener);
+        return () => {
+          ipcRenderer.removeListener('clipboard-url-detected', listener);
+        };
+      } catch (e) {}
+    }
+
+    // Web / Window focus listener fallback
+    const onFocus = async () => {
+      try {
+        if ((window as any).require) {
+          const { clipboard } = (window as any).require('electron');
+          const text = clipboard.readText();
+          handleAutoPaste(text);
+        } else if (navigator.clipboard && navigator.clipboard.readText) {
+          const text = await navigator.clipboard.readText();
+          handleAutoPaste(text);
+        }
+      } catch (e) {}
+    };
+
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [url, lastPastedUrl, t]);
 
   // Automatically fetch video or playlist details & available qualities
   useEffect(() => {
@@ -172,6 +322,20 @@ export function App() {
       });
       return;
     }
+
+    // Immediately clear previous error or completed status when pasting/typing a new URL
+    setVideoState(prev => {
+      if (prev.isDownloading) return prev;
+      return {
+        url: trimmed,
+        format: prev.format,
+        quality: prev.quality,
+        isDownloading: false,
+        progress: 0,
+        status: 'idle',
+        statusText: '',
+      };
+    });
 
     if (!trimmed.includes('youtube.com/') && !trimmed.includes('youtu.be/')) {
       setVideoInfo(null);
@@ -338,8 +502,45 @@ export function App() {
 
   return (
     <div className="glass-container">
-      {/* Top-Right Holographic Language Toggle */}
-      <div className="lang-toggle-wrap">
+      {/* Top-Left Theme Selector */}
+      <div className="top-left-controls-wrap" ref={themeMenuRef}>
+        <div className="theme-selector-container">
+          <button 
+            type="button"
+            className="theme-trigger-btn"
+            onClick={() => setIsThemeMenuOpen(prev => !prev)}
+            title={t.themeLabel}
+          >
+            <Palette size={14} />
+            <span 
+              className="theme-dot" 
+              style={{ backgroundColor: THEMES_LIST.find(th => th.id === theme)?.color }} 
+            />
+          </button>
+
+          {isThemeMenuOpen && (
+            <div className="theme-menu">
+              {THEMES_LIST.map(th => (
+                <button
+                  key={th.id}
+                  type="button"
+                  className={`theme-option-btn ${theme === th.id ? 'active' : ''}`}
+                  onClick={() => {
+                    setTheme(th.id);
+                    setIsThemeMenuOpen(false);
+                  }}
+                >
+                  <span className="theme-dot" style={{ backgroundColor: th.color }} />
+                  <span>{t.themes[th.id]}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Top-Right Language Switcher */}
+      <div className="top-right-controls-wrap">
         <div className="lang-toggle">
           <div 
             className="lang-slider" 
@@ -364,11 +565,23 @@ export function App() {
         </div>
       </div>
 
-      {/* Header */}
+      {/* Header with 3D Mascot Logo (Nimbi) */}
       <header className="app-header">
-        <div className="logo-badge">
-          <Sparkles size={14} className="sparkle-icon" />
-          <span>Nimbo</span>
+        <div 
+          className="mascot-header-wrap" 
+          onClick={handleNimbiClick}
+          title={lang === 'ru' ? 'Погладить Нимби ✨' : 'Pet Nimbi ✨'}
+        >
+          <img 
+            src="./mascot_logo.png" 
+            alt="Nimbi Open Eyes" 
+            className={`mascot-header-img ${isNimbiHappy ? 'hidden' : 'visible'}`} 
+          />
+          <img 
+            src="./mascot_happy.png" 
+            alt="Nimbi Happy Eyes" 
+            className={`mascot-header-img ${isNimbiHappy ? 'visible' : 'hidden'}`} 
+          />
         </div>
         <h1 className="app-title">Nimbo</h1>
         <p className="app-subtitle">{t.slogan}</p>
@@ -415,7 +628,7 @@ export function App() {
           />
         )}
         <Play className="input-icon" size={20} />
-        {url && (
+        {url ? (
           <button 
             className="clear-btn" 
             onClick={() => { 
@@ -434,8 +647,25 @@ export function App() {
           >
             <X size={16} />
           </button>
+        ) : (
+          <button 
+            className="paste-btn" 
+            onClick={handleManualPaste}
+            title={t.btnPaste}
+          >
+            <Clipboard size={14} />
+            <span>{t.btnPaste}</span>
+          </button>
         )}
       </div>
+
+      {/* Smart Clipboard Auto-Paste Toast Banner */}
+      {toastMsg && (
+        <div className="clipboard-toast">
+          <Sparkles size={14} color="var(--iridescent-cyan)" />
+          <span>{toastMsg}</span>
+        </div>
+      )}
 
       {/* Loading state for info */}
       {isFetchingInfo && (
@@ -603,7 +833,9 @@ export function App() {
 
           <div className="progress-status">
             <span>{videoState.statusText}</span>
-            <span>{videoState.progress}%</span>
+            {videoState.status !== 'error' && (
+              <span>{videoState.progress}%</span>
+            )}
           </div>
         </div>
       )}
