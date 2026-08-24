@@ -13,11 +13,82 @@ import {
   User,
   Sparkles,
   ListVideo,
-  Layers
+  Layers,
+  Globe
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
 type FormatType = 'mp4' | 'mp3';
+type Language = 'ru' | 'en';
+
+const TRANSLATIONS = {
+  ru: {
+    slogan: 'Ваш контент — без ограничений и в лучшем качестве',
+    tabVideo: 'Видео MP4',
+    tabAudio: 'Аудио MP3',
+    placeholderSingle: 'Вставьте ссылку на YouTube (видео или плейлист)...',
+    placeholderMulti: 'Вставьте ссылки на YouTube (по одной на строку)...',
+    fetchingInfo: 'Загрузка превью и доступных качеств ролика...',
+    playlistVideos: 'видео в плейлисте',
+    playlistQualityHeader: 'Качество для плейлиста',
+    videoQualityHeader: 'Доступное качество видео',
+    audioBitrateHeader: 'Битрейт звука MP3',
+    btnDownload: (fmt: string) => `Выбрать место и скачать ${fmt}`,
+    btnDownloading: 'Скачивание...',
+    connecting: 'Подключение к серверу Nimbo...',
+    formatLabel: 'Формат',
+    settingLabel: 'Настройка',
+    unknownTitle: 'Загрузка...',
+    serverError: 'Ошибка связи с бэкенд-сервером',
+    audioBitrateDesc: {
+      '320': 'HQ звук',
+      '256': 'Высокое',
+      '192': 'Стандарт',
+      '128': 'Компакт'
+    } as Record<string, string>,
+    qualityLabels: {
+      '2160p': '4K Ultra HD',
+      '1440p': '2K Quad HD',
+      '1080p': 'Full HD (1080p)',
+      '720p': 'HD (720p)',
+      '480p': '480p (SD)',
+      '360p': '360p (Компакт)'
+    } as Record<string, string>
+  },
+  en: {
+    slogan: 'Your content — without limits and in the best quality',
+    tabVideo: 'Video MP4',
+    tabAudio: 'Audio MP3',
+    placeholderSingle: 'Paste YouTube link (video or playlist)...',
+    placeholderMulti: 'Paste YouTube links (one per line)...',
+    fetchingInfo: 'Fetching preview and available video qualities...',
+    playlistVideos: 'videos in playlist',
+    playlistQualityHeader: 'Playlist video quality',
+    videoQualityHeader: 'Available video quality',
+    audioBitrateHeader: 'MP3 audio bitrate',
+    btnDownload: (fmt: string) => `Select folder & download ${fmt}`,
+    btnDownloading: 'Downloading...',
+    connecting: 'Connecting to Nimbo engine...',
+    formatLabel: 'Format',
+    settingLabel: 'Quality',
+    unknownTitle: 'Loading...',
+    serverError: 'Failed to connect to backend server',
+    audioBitrateDesc: {
+      '320': 'HQ Audio',
+      '256': 'High',
+      '192': 'Standard',
+      '128': 'Compact'
+    } as Record<string, string>,
+    qualityLabels: {
+      '2160p': '4K Ultra HD',
+      '1440p': '2K Quad HD',
+      '1080p': 'Full HD (1080p)',
+      '720p': 'HD (720p)',
+      '480p': '480p (SD)',
+      '360p': '360p (Compact)'
+    } as Record<string, string>
+  }
+};
 
 interface VideoInfo {
   isPlaylist?: boolean;
@@ -46,24 +117,26 @@ interface QualityOption {
   isUltra?: boolean;
 }
 
-const getQualityOption = (q: string): QualityOption => {
-  if (q === '2160p') return { value: '2160p', tag: '4K', label: '4K Ultra HD', isUltra: true };
-  if (q === '1440p') return { value: '1440p', tag: '2K', label: '2K Quad HD', isUltra: true };
-  if (q === '1080p') return { value: '1080p', tag: '1080p', label: 'Full HD' };
-  if (q === '720p') return { value: '720p', tag: '720p', label: 'HD 720p' };
-  if (q === '480p') return { value: '480p', tag: '480p', label: 'SD 480p' };
-  if (q === '360p') return { value: '360p', tag: '360p', label: '360p Lite' };
-  return { value: q, tag: q, label: q };
+const getQualityOption = (q: string, lang: Language): QualityOption => {
+  const label = TRANSLATIONS[lang].qualityLabels[q] || q;
+  if (q === '2160p') return { value: '2160p', tag: '4K', label, isUltra: true };
+  if (q === '1440p') return { value: '1440p', tag: '2K', label, isUltra: true };
+  if (q === '1080p') return { value: '1080p', tag: '1080p', label };
+  if (q === '720p') return { value: '720p', tag: '720p', label };
+  if (q === '480p') return { value: '480p', tag: '480p', label };
+  if (q === '360p') return { value: '360p', tag: '360p', label };
+  return { value: q, tag: q, label };
 };
 
-const AUDIO_BITRATES = [
-  { value: '320', tag: '320k', label: '320 kbps', desc: 'HQ звук' },
-  { value: '256', tag: '256k', label: '256 kbps', desc: 'Высокое' },
-  { value: '192', tag: '192k', label: '192 kbps', desc: 'Стандарт' },
-  { value: '128', tag: '128k', label: '128 kbps', desc: 'Компакт' }
-];
+const AUDIO_BITRATE_KEYS = ['320', '256', '192', '128'];
 
 export function App() {
+  const [lang, setLang] = useState<Language>(() => {
+    const saved = localStorage.getItem('nimbo_lang');
+    return (saved === 'en' || saved === 'ru') ? saved : 'ru';
+  });
+  const t = TRANSLATIONS[lang];
+
   const [url, setUrl] = useState('');
   const [format, setFormat] = useState<FormatType>('mp4');
   const [quality, setQuality] = useState('1080p');
@@ -168,7 +241,7 @@ export function App() {
       isDownloading: true,
       progress: 0,
       status: 'downloading',
-      statusText: 'Подключение к серверу Nimbo...',
+      statusText: t.connecting,
     });
 
     try {
@@ -185,7 +258,7 @@ export function App() {
       });
 
       if (!response.ok || !response.body) {
-        throw new Error('Ошибка связи с бэкенд-сервером');
+        throw new Error(t.serverError);
       }
 
       const reader = response.body.getReader();
@@ -258,8 +331,39 @@ export function App() {
 
   const isMultiUrl = url.trim().split('\n').filter(u => u.trim()).length > 1;
 
+  const handleLanguageChange = (newLang: Language) => {
+    setLang(newLang);
+    localStorage.setItem('nimbo_lang', newLang);
+  };
+
   return (
     <div className="glass-container">
+      {/* Top-Right Holographic Language Toggle */}
+      <div className="lang-toggle-wrap">
+        <div className="lang-toggle">
+          <div 
+            className="lang-slider" 
+            style={{ transform: lang === 'ru' ? 'translateX(0%)' : 'translateX(100%)' }}
+          />
+          <button 
+            type="button"
+            className={`lang-btn ${lang === 'ru' ? 'active' : ''}`}
+            onClick={() => handleLanguageChange('ru')}
+            title="Русский язык"
+          >
+            RU
+          </button>
+          <button 
+            type="button"
+            className={`lang-btn ${lang === 'en' ? 'active' : ''}`}
+            onClick={() => handleLanguageChange('en')}
+            title="English language"
+          >
+            EN
+          </button>
+        </div>
+      </div>
+
       {/* Header */}
       <header className="app-header">
         <div className="logo-badge">
@@ -267,7 +371,7 @@ export function App() {
           <span>Nimbo</span>
         </div>
         <h1 className="app-title">Nimbo</h1>
-        <p className="app-subtitle">Элегантное скачивание видео и аудио с YouTube в выбранную папку</p>
+        <p className="app-subtitle">{t.slogan}</p>
       </header>
 
       {/* Format Selector Tabs */}
@@ -281,14 +385,14 @@ export function App() {
           onClick={() => setFormat('mp4')}
         >
           <Video size={18} />
-          <span>Видео MP4</span>
+          <span>{t.tabVideo}</span>
         </button>
         <button 
           className={`tab-btn ${format === 'mp3' ? 'active' : ''}`}
           onClick={() => setFormat('mp3')}
         >
           <Music size={18} />
-          <span>Аудио MP3</span>
+          <span>{t.tabAudio}</span>
         </button>
       </div>
 
@@ -297,7 +401,7 @@ export function App() {
         {isMultiUrl ? (
           <textarea 
             className="url-input multi-url-input"
-            placeholder="Вставьте ссылки на YouTube (по одной на строку)..."
+            placeholder={t.placeholderMulti}
             value={url}
             onChange={(e) => setUrl(e.target.value)}
           />
@@ -305,7 +409,7 @@ export function App() {
           <input 
             type="text"
             className="url-input single-url-input"
-            placeholder="Вставьте ссылку на YouTube (видео или плейлист)..."
+            placeholder={t.placeholderSingle}
             value={url}
             onChange={(e) => setUrl(e.target.value)}
           />
@@ -337,7 +441,7 @@ export function App() {
       {isFetchingInfo && (
         <div className="progress-card" style={{ display: 'flex', alignItems: 'center', gap: '0.8rem' }}>
           <Loader2 className="animate-spin" size={20} color="var(--iridescent-purple)" />
-          <span style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Загрузка превью и доступных качеств ролика...</span>
+          <span style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>{t.fetchingInfo}</span>
         </div>
       )}
 
@@ -364,7 +468,7 @@ export function App() {
               {videoInfo.isPlaylist ? (
                 <>
                   <span style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-                    <Layers size={13} color="var(--iridescent-purple)" /> {videoInfo.itemCount} видео в плейлисте
+                    <Layers size={13} color="var(--iridescent-purple)" /> {videoInfo.itemCount} {t.playlistVideos}
                   </span>
                 </>
               ) : (
@@ -392,12 +496,12 @@ export function App() {
               {format === 'mp4' ? (
                 <>
                   <Video size={15} color="var(--iridescent-purple)" />
-                  <span>{videoInfo.isPlaylist ? 'Качество для плейлиста' : 'Доступное качество видео'}</span>
+                  <span>{videoInfo.isPlaylist ? t.playlistQualityHeader : t.videoQualityHeader}</span>
                 </>
               ) : (
                 <>
                   <Music size={15} color="var(--iridescent-blue)" />
-                  <span>Битрейт звука MP3</span>
+                  <span>{t.audioBitrateHeader}</span>
                 </>
               )}
             </div>
@@ -412,7 +516,7 @@ export function App() {
                 ? videoInfo.availableQualities 
                 : ['1080p', '720p', '480p', '360p']
               ).map((q) => {
-                const opt = getQualityOption(q);
+                const opt = getQualityOption(q, lang);
                 const isSelected = quality === opt.value;
                 return (
                   <button
@@ -429,19 +533,19 @@ export function App() {
             </div>
           ) : (
             <div className="quality-grid">
-              {AUDIO_BITRATES.map((item) => {
-                const isSelected = audioBitrate === item.value;
+              {AUDIO_BITRATE_KEYS.map((key) => {
+                const isSelected = audioBitrate === key;
                 return (
                   <button
-                    key={item.value}
+                    key={key}
                     type="button"
                     className={`quality-card-btn ${isSelected ? 'active' : ''}`}
-                    onClick={() => setAudioBitrate(item.value)}
+                    onClick={() => setAudioBitrate(key)}
                   >
-                    <span className="quality-badge">{item.tag}</span>
+                    <span className="quality-badge">{key}k</span>
                     <div className="quality-audio-info">
-                      <span className="quality-name">{item.label}</span>
-                      <span className="quality-desc">{item.desc}</span>
+                      <span className="quality-name">{key} kbps</span>
+                      <span className="quality-desc">{t.audioBitrateDesc[key]}</span>
                     </div>
                   </button>
                 );
@@ -460,12 +564,12 @@ export function App() {
         {videoState.isDownloading ? (
           <>
             <Loader2 size={20} className="animate-spin" />
-            <span>Скачивание...</span>
+            <span>{t.btnDownloading}</span>
           </>
         ) : (
           <>
             <FolderOpen size={20} />
-            <span>Выбрать место и скачать {format.toUpperCase()}</span>
+            <span>{t.btnDownload(format.toUpperCase())}</span>
           </>
         )}
       </button>
@@ -476,9 +580,9 @@ export function App() {
           <div className="progress-header">
             <div className="video-info">
               <div className="video-details">
-                <span className="video-title">{videoInfo ? videoInfo.title : 'Загрузка...'}</span>
+                <span className="video-title">{videoInfo ? videoInfo.title : t.unknownTitle}</span>
                 <span className="video-meta">
-                  Формат: {videoState.format.toUpperCase()} | Настройка: {videoState.quality}
+                  {t.formatLabel}: {videoState.format.toUpperCase()} | {t.settingLabel}: {videoState.quality}
                 </span>
               </div>
             </div>
