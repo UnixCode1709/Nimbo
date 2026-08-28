@@ -200,13 +200,12 @@ expressApp.post('/api/open-file', async (req, res) => {
 });
 
 // =============================================================================
-// FAST Parallel Info Fetch (v1.1.9 — inspired by Cliply)
+// FAST Parallel Info Fetch with Full Quality Guarantee
 // =============================================================================
 
 const YOUTUBE_CLIENTS = [
-  'visionos',
-  'android;player_skip=configs',
-  'ios;player_skip=configs',
+  'visionos,android',
+  'default'
 ];
 
 expressApp.post('/api/info', async (req, res) => {
@@ -215,8 +214,7 @@ expressApp.post('/api/info', async (req, res) => {
 
   const cleanUrl = cleanVideoUrl(url);
 
-  // Launch ALL clients in parallel — first successful wins
-  const raceResult = await raceInfoFetch(cleanUrl, YOUTUBE_CLIENTS, 10000);
+  const raceResult = await raceInfoFetch(cleanUrl, YOUTUBE_CLIENTS, 12000);
 
   if (raceResult && raceResult.stdoutData) {
     try {
@@ -270,21 +268,25 @@ expressApp.post('/api/info', async (req, res) => {
 });
 
 /**
- * Race multiple yt-dlp info fetches in parallel.
- * First successful (exit 0 + stdout) wins; all others are killed.
+ * Fetch yt-dlp info prioritizing clients that provide full video resolutions (1080p/4K).
  */
-function raceInfoFetch(url, clients, timeoutMs = 10000) {
+function raceInfoFetch(url, clients, timeoutMs = 12000) {
   return new Promise((resolve) => {
     let settled = false;
     const processes = [];
+    let bestResult = null;
+    let pendingCount = clients.length;
 
-    // Global timeout — if nothing works within timeoutMs, give up
     const globalTimer = setTimeout(() => {
       if (settled) return;
       settled = true;
-      console.warn(`[Nimbo] Info fetch timed out after ${timeoutMs}ms`);
       processes.forEach(p => killProcessTree(p));
-      resolve(null);
+      if (bestResult) {
+        resolve(bestResult);
+      } else {
+        console.warn(`[Nimbo] Info fetch timed out after ${timeoutMs}ms`);
+        resolve(null);
+      }
     }, timeoutMs);
 
     const tryClient = (clientConfig) => {
@@ -293,9 +295,13 @@ function raceInfoFetch(url, clients, timeoutMs = 10000) {
         '--no-warnings',
         '--no-playlist',
         '--socket-timeout', '10',
-        '--extractor-args', `youtube:player_client=${clientConfig}`,
-        '--', url
       ];
+
+      if (clientConfig !== 'default') {
+        args.push('--extractor-args', `youtube:player_client=${clientConfig}`);
+      }
+
+      args.push('--', url);
 
       const proc = spawn(YT_DLP_PATH, args, { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
       processes.push(proc);
@@ -307,35 +313,58 @@ function raceInfoFetch(url, clients, timeoutMs = 10000) {
       proc.stderr.on('data', (data) => stderrData += data.toString());
 
       proc.on('close', (code) => {
+        pendingCount--;
         if (settled) return;
 
         if (code === 0 && stdoutData.trim()) {
+          try {
+            const parsed = JSON.parse(stdoutData);
+            let maxHeight = 0;
+            if (parsed.formats && Array.isArray(parsed.formats)) {
+              maxHeight = Math.max(0, ...parsed.formats.map(f => (typeof f.height === 'number' ? f.height : 0)));
+            }
+
+            const current = { code, stdoutData, stderrData, maxHeight };
+
+            // If this response has high quality (>= 720p or playlist), resolve immediately!
+            if (maxHeight >= 720 || parsed._type === 'playlist' || pendingCount === 0) {
+              settled = true;
+              clearTimeout(globalTimer);
+              console.log(`[Nimbo] ✓ Full info fetched via client: ${clientConfig} (max height: ${maxHeight}p)`);
+              processes.forEach(p => {
+                if (p !== proc) killProcessTree(p);
+              });
+              return resolve(current);
+            }
+
+            // Otherwise save as best so far and wait for a higher quality client
+            if (!bestResult || maxHeight > (bestResult.maxHeight || 0)) {
+              bestResult = current;
+            }
+          } catch {
+            if (!bestResult) {
+              bestResult = { code, stdoutData, stderrData };
+            }
+          }
+        }
+
+        if (pendingCount === 0 && !settled) {
           settled = true;
           clearTimeout(globalTimer);
-          console.log(`[Nimbo] ✓ Info fetched via client: ${clientConfig}`);
-          // Kill remaining processes
-          processes.forEach(p => {
-            if (p !== proc) killProcessTree(p);
-          });
-          resolve({ code, stdoutData, stderrData });
-        }
-        // If this was the last one and none succeeded
-        else {
-          const allDone = processes.every(p => p.exitCode !== null || p.killed);
-          if (allDone && !settled) {
-            settled = true;
-            clearTimeout(globalTimer);
-            resolve({ code, stdoutData: '', stderrData });
-          }
+          resolve(bestResult || { code, stdoutData: '', stderrData });
         }
       });
 
       proc.on('error', () => {
-        // Ignore spawn errors for individual clients
+        pendingCount--;
+        if (pendingCount === 0 && !settled) {
+          settled = true;
+          clearTimeout(globalTimer);
+          resolve(bestResult);
+        }
       });
     };
 
-    // Launch all clients simultaneously!
     for (const client of clients) {
       tryClient(client);
     }
