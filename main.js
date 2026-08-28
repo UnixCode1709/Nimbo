@@ -165,6 +165,40 @@ expressApp.post('/api/select-folder', async (req, res) => {
   }
 });
 
+// Open Folder or highlight File in Explorer
+expressApp.post('/api/open-folder', async (req, res) => {
+  const { folder, filePath } = req.body || {};
+  try {
+    if (filePath && fs.existsSync(filePath)) {
+      shell.showItemInFolder(filePath);
+      return res.json({ success: true });
+    }
+    const target = folder || (filePath ? path.dirname(filePath) : defaultDownloadsDir);
+    if (fs.existsSync(target)) {
+      await shell.openPath(target);
+      return res.json({ success: true });
+    }
+    await shell.openPath(defaultDownloadsDir);
+    return res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Не удалось открыть папку' });
+  }
+});
+
+// Open File in default player
+expressApp.post('/api/open-file', async (req, res) => {
+  const { filePath } = req.body || {};
+  try {
+    if (filePath && fs.existsSync(filePath)) {
+      await shell.openPath(filePath);
+      return res.json({ success: true });
+    }
+    res.status(404).json({ error: 'Файл не найден' });
+  } catch (err) {
+    res.status(500).json({ error: 'Не удалось открыть файл' });
+  }
+});
+
 // =============================================================================
 // FAST Parallel Info Fetch (v1.1.9 — inspired by Cliply)
 // =============================================================================
@@ -378,6 +412,7 @@ expressApp.post('/api/download', (req, res) => {
 
   const proc = spawn(YT_DLP_PATH, args, { windowsHide: true });
   let stderrLines = [];
+  let lastDestinationFile = null;
 
   // Watchdog: kill if silent for 2 minutes
   const watchdog = createWatchdog(proc, 120000);
@@ -409,6 +444,10 @@ expressApp.post('/api/download', (req, res) => {
           progress: 92,
           message: 'Конвертация и сведение в файл...'
         });
+        const mergerMatch = line.match(/Merging formats into "(.+)"/i);
+        if (mergerMatch) {
+          lastDestinationFile = mergerMatch[1].trim();
+        }
       } else if (line.includes('[EmbedThumbnail]') || line.includes('[Metadata]')) {
         sendEvent({
           status: 'processing',
@@ -417,7 +456,11 @@ expressApp.post('/api/download', (req, res) => {
         });
       } else if (line.includes('[download] Destination:')) {
         const dest = line.replace('[download] Destination:', '').trim();
+        lastDestinationFile = dest;
         console.log('[Nimbo] Saving to:', dest);
+      } else if (line.includes('[ExtractAudio] Destination:')) {
+        const dest = line.replace('[ExtractAudio] Destination:', '').trim();
+        lastDestinationFile = dest;
       }
     }
   });
@@ -439,7 +482,8 @@ expressApp.post('/api/download', (req, res) => {
         status: 'completed',
         progress: 100,
         message: `Файл успешно сохранён в: ${targetDir}`,
-        folder: targetDir
+        folder: targetDir,
+        filePath: lastDestinationFile || null
       });
 
       // Native Windows Desktop Notification

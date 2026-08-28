@@ -16,7 +16,13 @@ import {
   Layers,
   Globe,
   Clipboard,
-  Palette
+  Palette,
+  History,
+  Trash2,
+  Copy,
+  Check,
+  RefreshCw,
+  ExternalLink
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
@@ -36,6 +42,20 @@ const THEMES_LIST: ThemeInfo[] = [
   { id: 'velvet-nebula', color: '#C77DFF' },
   { id: 'emerald-minimal', color: '#34D399' },
 ];
+
+export interface HistoryItem {
+  id: string;
+  url: string;
+  title: string;
+  thumbnail: string;
+  uploader: string;
+  format: FormatType;
+  quality: string;
+  timestamp: number;
+  folder: string;
+  filePath?: string;
+  duration?: string;
+}
 
 const TRANSLATIONS = {
   ru: {
@@ -59,6 +79,19 @@ const TRANSLATIONS = {
     btnPaste: 'Вставить из буфера',
     clipboardToast: 'Ссылка обнаружена в буфере и вставлена!',
     themeLabel: 'Тема оформления',
+    historyBtn: 'История',
+    historyTitle: 'История загрузок',
+    historyEmptyTitle: 'История загрузок пуста',
+    historyEmptyDesc: 'Скачанные видео и аудио треки будут сохраняться здесь',
+    historyClearAll: 'Очистить всё',
+    historyClearConfirm: 'Вы действительно хотите очистить историю загрузок?',
+    historyItemOpenFolder: 'Открыть папку',
+    historyItemOpenFile: 'Воспроизвести файл',
+    historyItemCopyLink: 'Скопировать ссылку',
+    historyItemCopied: 'Ссылка скопирована!',
+    historyItemReDownload: 'Загрузить снова',
+    historyItemDelete: 'Удалить из списка',
+    historyCount: (n: number) => `${n} ${n === 1 ? 'запись' : (n >= 2 && n <= 4 ? 'записи' : 'записей')}`,
     themes: {
       'obsidian-holo': 'Obsidian (Тёмная)',
       'pearl-aurora': 'Pearl (Светлая)',
@@ -102,6 +135,19 @@ const TRANSLATIONS = {
     btnPaste: 'Paste from clipboard',
     clipboardToast: 'Link detected in clipboard and pasted!',
     themeLabel: 'Theme',
+    historyBtn: 'History',
+    historyTitle: 'Download History',
+    historyEmptyTitle: 'History is empty',
+    historyEmptyDesc: 'Your downloaded videos and music tracks will appear here',
+    historyClearAll: 'Clear all',
+    historyClearConfirm: 'Are you sure you want to clear your download history?',
+    historyItemOpenFolder: 'Open folder',
+    historyItemOpenFile: 'Play file',
+    historyItemCopyLink: 'Copy link',
+    historyItemCopied: 'Link copied!',
+    historyItemReDownload: 'Download again',
+    historyItemDelete: 'Remove from history',
+    historyCount: (n: number) => `${n} ${n === 1 ? 'item' : 'items'}`,
     themes: {
       'obsidian-holo': 'Obsidian (Dark)',
       'pearl-aurora': 'Pearl (Light)',
@@ -236,6 +282,91 @@ export function App() {
     status: 'idle',
     statusText: '',
   });
+
+  const [history, setHistory] = useState<HistoryItem[]>(() => {
+    try {
+      const saved = localStorage.getItem('nimbo_history');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  const saveHistory = (items: HistoryItem[]) => {
+    setHistory(items);
+    localStorage.setItem('nimbo_history', JSON.stringify(items));
+  };
+
+  const handleClearHistory = () => {
+    if (history.length === 0) return;
+    if (window.confirm(t.historyClearConfirm)) {
+      saveHistory([]);
+    }
+  };
+
+  const handleRemoveHistoryItem = (id: string, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    const updated = history.filter(item => item.id !== id);
+    saveHistory(updated);
+  };
+
+  const handleOpenFolder = async (folder?: string, filePath?: string, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    try {
+      await fetch('http://localhost:3001/api/open-folder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folder, filePath })
+      });
+    } catch (err) {
+      console.error('Failed to open folder', err);
+    }
+  };
+
+  const handleOpenFile = async (filePath?: string, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    if (!filePath) return;
+    try {
+      const res = await fetch('http://localhost:3001/api/open-file', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filePath })
+      });
+      if (!res.ok) {
+        // Fallback to opening containing folder
+        handleOpenFolder(undefined, filePath);
+      }
+    } catch (err) {
+      console.error('Failed to open file', err);
+    }
+  };
+
+  const handleCopyUrl = (id: string, itemUrl: string, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    try {
+      navigator.clipboard.writeText(itemUrl);
+      setCopiedId(id);
+      setTimeout(() => setCopiedId(null), 1600);
+    } catch (err) {
+      console.error('Failed to copy link', err);
+    }
+  };
+
+  const handleReDownload = (item: HistoryItem) => {
+    setUrl(item.url);
+    setFormat(item.format);
+    if (item.format === 'mp4') {
+      setQuality(item.quality);
+    } else {
+      const br = item.quality.replace(/\D/g, '');
+      if (br && AUDIO_BITRATE_KEYS.includes(br)) {
+        setAudioBitrate(br);
+      }
+    }
+    setIsHistoryOpen(false);
+  };
 
   const showToast = (msg: string) => {
     setToastMsg(msg);
@@ -463,6 +594,27 @@ export function App() {
                   statusText: data.message
                 }));
 
+                const newItem: HistoryItem = {
+                  id: `${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+                  url: url.trim(),
+                  title: videoInfo?.title || 'YouTube Video',
+                  thumbnail: videoInfo?.thumbnail || '',
+                  uploader: videoInfo?.uploader || 'YouTube',
+                  format,
+                  quality: format === 'mp4' ? quality : `${audioBitrate} kbps`,
+                  timestamp: Date.now(),
+                  folder: data.folder || selected,
+                  filePath: data.filePath || undefined,
+                  duration: videoInfo?.duration
+                };
+
+                setHistory(prev => {
+                  const filtered = prev.filter(h => !(h.url === newItem.url && h.format === newItem.format && h.quality === newItem.quality));
+                  const updated = [newItem, ...filtered].slice(0, 100);
+                  localStorage.setItem('nimbo_history', JSON.stringify(updated));
+                  return updated;
+                });
+
                 confetti({
                   particleCount: 100,
                   spread: 80,
@@ -498,6 +650,17 @@ export function App() {
   const handleLanguageChange = (newLang: Language) => {
     setLang(newLang);
     localStorage.setItem('nimbo_lang', newLang);
+  };
+
+  const formatTimestamp = (ts: number, currentLang: Language) => {
+    const d = new Date(ts);
+    const now = new Date();
+    const isToday = d.toDateString() === now.toDateString();
+    const timeStr = d.toLocaleTimeString(currentLang === 'ru' ? 'ru-RU' : 'en-US', { hour: '2-digit', minute: '2-digit' });
+    if (isToday) {
+      return currentLang === 'ru' ? `Сегодня, ${timeStr}` : `Today, ${timeStr}`;
+    }
+    return d.toLocaleDateString(currentLang === 'ru' ? 'ru-RU' : 'en-US', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
   };
 
   return (
@@ -539,8 +702,21 @@ export function App() {
         </div>
       </div>
 
-      {/* Top-Right Language Switcher */}
+      {/* Top-Right Controls: History Button + Language Switcher */}
       <div className="top-right-controls-wrap">
+        <button 
+          type="button"
+          className="history-trigger-btn"
+          onClick={() => setIsHistoryOpen(true)}
+          title={t.historyTitle}
+        >
+          <History size={14} />
+          <span>{t.historyBtn}</span>
+          {history.length > 0 && (
+            <span className="history-badge">{history.length}</span>
+          )}
+        </button>
+
         <div className="lang-toggle">
           <div 
             className="lang-slider" 
@@ -836,6 +1012,136 @@ export function App() {
             {videoState.status !== 'error' && (
               <span>{videoState.progress}%</span>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Download History Modal */}
+      {isHistoryOpen && (
+        <div className="modal-backdrop" onClick={() => setIsHistoryOpen(false)}>
+          <div className="modal-content history-modal" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <div className="modal-title-wrap">
+                <History size={20} className="modal-icon" />
+                <div className="modal-title-text">
+                  <h3>{t.historyTitle}</h3>
+                  <span className="modal-subtitle">{t.historyCount(history.length)}</span>
+                </div>
+              </div>
+              <div className="modal-header-actions">
+                {history.length > 0 && (
+                  <button 
+                    type="button" 
+                    className="modal-clear-btn"
+                    onClick={handleClearHistory}
+                    title={t.historyClearAll}
+                  >
+                    <Trash2 size={14} />
+                    <span>{t.historyClearAll}</span>
+                  </button>
+                )}
+                <button 
+                  type="button" 
+                  className="modal-close-btn"
+                  onClick={() => setIsHistoryOpen(false)}
+                >
+                  <X size={18} />
+                </button>
+              </div>
+            </div>
+
+            <div className="history-list-container">
+              {history.length === 0 ? (
+                <div className="history-empty-state">
+                  <img src="./mascot_happy.png" alt="Nimbi Happy" className="history-empty-mascot" />
+                  <h4>{t.historyEmptyTitle}</h4>
+                  <p>{t.historyEmptyDesc}</p>
+                </div>
+              ) : (
+                <div className="history-items-grid">
+                  {history.map((item) => (
+                    <div key={item.id} className="history-card">
+                      <div className="history-card-thumb-wrap">
+                        {item.thumbnail ? (
+                          <img src={item.thumbnail} alt={item.title} className="history-card-thumb" />
+                        ) : (
+                          <div className="history-card-thumb-placeholder">
+                            {item.format === 'mp3' ? <Music size={24} /> : <Video size={24} />}
+                          </div>
+                        )}
+                        <span className={`history-format-badge ${item.format}`}>
+                          {item.format.toUpperCase()}
+                        </span>
+                        <span className="history-quality-badge">
+                          {item.quality}
+                        </span>
+                        {item.duration && (
+                          <span className="history-duration-badge">
+                            {item.duration}
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="history-card-body">
+                        <h4 className="history-card-title" title={item.title}>
+                          {item.title}
+                        </h4>
+                        <div className="history-card-meta">
+                          <span className="history-uploader">{item.uploader}</span>
+                          <span className="history-dot">•</span>
+                          <span className="history-time">{formatTimestamp(item.timestamp, lang)}</span>
+                        </div>
+                      </div>
+
+                      <div className="history-card-actions">
+                        <button
+                          type="button"
+                          className="history-action-btn"
+                          onClick={(e) => handleOpenFolder(item.folder, item.filePath, e)}
+                          title={t.historyItemOpenFolder}
+                        >
+                          <FolderOpen size={16} />
+                        </button>
+                        {item.filePath && (
+                          <button
+                            type="button"
+                            className="history-action-btn"
+                            onClick={(e) => handleOpenFile(item.filePath, e)}
+                            title={t.historyItemOpenFile}
+                          >
+                            <Play size={16} />
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          className="history-action-btn"
+                          onClick={(e) => handleCopyUrl(item.id, item.url, e)}
+                          title={copiedId === item.id ? t.historyItemCopied : t.historyItemCopyLink}
+                        >
+                          {copiedId === item.id ? <Check size={16} color="#34D399" /> : <Copy size={16} />}
+                        </button>
+                        <button
+                          type="button"
+                          className="history-action-btn"
+                          onClick={() => handleReDownload(item)}
+                          title={t.historyItemReDownload}
+                        >
+                          <RefreshCw size={16} />
+                        </button>
+                        <button
+                          type="button"
+                          className="history-action-btn delete"
+                          onClick={(e) => handleRemoveHistoryItem(item.id, e)}
+                          title={t.historyItemDelete}
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}

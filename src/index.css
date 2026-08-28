@@ -165,7 +165,7 @@ body {
   align-items: center;
 }
 
-/* Top-Right Controls: Language Switcher */
+/* Top-Right Controls: Language Switcher & History */
 .top-right-controls-wrap {
   position: absolute;
   top: 1.8rem;
@@ -173,6 +173,41 @@ body {
   z-index: 40;
   display: flex;
   align-items: center;
+  gap: 10px;
+}
+
+.history-trigger-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-card-inner);
+  border: 1px solid var(--border-holo);
+  color: var(--text-primary);
+  padding: 0.38rem 0.75rem;
+  border-radius: 12px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+  backdrop-filter: blur(10px);
+  transition: all 0.25s ease;
+  font-family: inherit;
+  position: relative;
+}
+
+.history-trigger-btn:hover {
+  border-color: var(--iridescent-purple);
+  box-shadow: 0 0 15px rgba(212, 178, 255, 0.25);
+  transform: translateY(-1px);
+}
+
+.history-badge {
+  background: var(--iridescent-gradient);
+  color: #0A0A0C;
+  font-size: 0.68rem;
+  font-weight: 800;
+  padding: 1px 5px;
+  border-radius: 999px;
+  line-height: 1.2;
 }
 
 /* Theme Dropdown / Switcher */
@@ -800,4 +835,352 @@ body {
 .progress-status > span:last-child {
   flex-shrink: 0;
   font-weight: 700;
+}
+
+/* =============================================================================
+   Download History Modal & Cards
+   ============================================================================= */
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 1.5rem;
+  animation: modalFadeIn 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes modalFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.modal-content.history-modal {
+  background: var(--bg-card);
+  border: 1px solid var(--border-holo);
+  border-radius: 24px;
+  box-shadow: var(--card-shadow), 0 30px 80px rgba(0, 0, 0, 0.8);
+  width: 100%;
+  max-width: 660px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: modalSlideUp 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes modalSlideUp {
+  from { opacity: 0; transform: scale(0.96) translateY(12px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1.2rem 1.6rem;
+  border-bottom: 1px solid var(--border-color);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.modal-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.modal-icon {
+  color: var(--iridescent-purple);
+}
+
+.modal-title-text h3 {
+  margin: 0;
+  font-size: 1.12rem;
+  font-weight: 800;
+  color: var(--text-primary);
+  letter-spacing: -0.02em;
+}
+
+.modal-subtitle {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.modal-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.modal-clear-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: #F87171;
+  font-size: 0.76rem;
+  font-weight: 600;
+  padding: 0.35rem 0.65rem;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-family: inherit;
+}
+
+.modal-clear-btn:hover {
+  background: rgba(239, 68, 68, 0.25);
+  border-color: #EF4444;
+  transform: translateY(-1px);
+}
+
+.modal-close-btn {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.modal-close-btn:hover {
+  background: rgba(255, 255, 255, 0.15);
+  color: var(--text-primary);
+  transform: scale(1.05);
+}
+
+.history-list-container {
+  padding: 1.2rem 1.4rem;
+  overflow-y: auto;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.history-list-container::-webkit-scrollbar {
+  width: 6px;
+}
+
+.history-list-container::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.history-list-container::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 999px;
+}
+
+.history-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 2.8rem 1.5rem;
+  text-align: center;
+}
+
+.history-empty-mascot {
+  width: 80px;
+  height: 80px;
+  object-fit: contain;
+  margin-bottom: 0.85rem;
+  filter: drop-shadow(0 8px 20px rgba(212, 178, 255, 0.25));
+  animation: floatMascot 4s ease-in-out infinite;
+}
+
+.history-empty-state h4 {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0 0 0.35rem 0;
+}
+
+.history-empty-state p {
+  font-size: 0.84rem;
+  color: var(--text-muted);
+  margin: 0;
+  max-width: 320px;
+}
+
+.history-items-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.history-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--bg-card-inner);
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+  padding: 9px 12px;
+  transition: all 0.25s ease;
+}
+
+.history-card:hover {
+  border-color: var(--border-holo);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+  transform: translateY(-1px);
+}
+
+.history-card-thumb-wrap {
+  position: relative;
+  width: 96px;
+  height: 56px;
+  border-radius: 10px;
+  overflow: hidden;
+  flex-shrink: 0;
+  background: #000;
+}
+
+.history-card-thumb {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.history-card-thumb-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-muted);
+}
+
+.history-format-badge {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  font-size: 0.62rem;
+  font-weight: 800;
+  padding: 1px 4px;
+  border-radius: 4px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.history-format-badge.mp4 {
+  background: rgba(162, 227, 255, 0.95);
+  color: #0A0A0C;
+}
+
+.history-format-badge.mp3 {
+  background: rgba(255, 209, 237, 0.95);
+  color: #0A0A0C;
+}
+
+.history-quality-badge {
+  position: absolute;
+  bottom: 3px;
+  left: 3px;
+  font-size: 0.6rem;
+  font-weight: 700;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.78);
+  color: #FFF;
+}
+
+.history-duration-badge {
+  position: absolute;
+  bottom: 3px;
+  right: 3px;
+  font-size: 0.6rem;
+  font-weight: 700;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.82);
+  color: #FFF;
+}
+
+.history-card-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.history-card-title {
+  margin: 0;
+  font-size: 0.86rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.history-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.74rem;
+  color: var(--text-muted);
+}
+
+.history-uploader {
+  font-weight: 600;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 140px;
+}
+
+.history-dot {
+  opacity: 0.5;
+}
+
+.history-time {
+  white-space: nowrap;
+}
+
+.history-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.history-action-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.history-action-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--text-primary);
+  border-color: var(--border-holo);
+  transform: translateY(-1px);
+}
+
+.history-action-btn.delete:hover {
+  background: rgba(239, 68, 68, 0.2);
+  color: #EF4444;
+  border-color: rgba(239, 68, 68, 0.4);
 }
