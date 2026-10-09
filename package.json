@@ -1,7 +1,7 @@
 {
   "name": "nimbo",
   "private": true,
-  "version": "1.2.1",
+  "version": "1.2.2",
   "main": "main.js",
   "type": "commonjs",
   "scripts": {
@@ -9,8 +9,9 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
+    "fetch:binaries": "node scripts/fetch-binaries.js",
     "electron:dev": "concurrently \"npm run dev\" \"wait-on http://localhost:5173 && electron .\"",
-    "electron:build": "npm run build && electron-builder"
+    "electron:build": "node scripts/fetch-binaries.js && npm run build && electron-builder"
   },
   "build": {
     "appId": "com.nimbo.downloader",
@@ -18,6 +19,13 @@
     "files": [
       "dist/**/*",
       "main.js"
+    ],
+    "extraResources": [
+      {
+        "from": "binaries/",
+        "to": "binaries/",
+        "filter": ["**/*"]
+      }
     ],
     "directories": {
       "output": "dist_installer"

@@ -14,41 +14,29 @@ expressApp.use(express.json());
 const defaultDownloadsDir = path.join(os.homedir(), 'Downloads');
 
 // =============================================================================
-// Smart Binary Discovery (inspired by Cliply)
+// Smart Binary Discovery (Bundled + System Fallbacks)
 // =============================================================================
 
 function findBinary(name, extraPaths = []) {
-  // 1. Next to app executable (bundled)
-  const appDir = app.isPackaged
-    ? path.dirname(app.getPath('exe'))
-    : __dirname;
+  const candidates = [
+    // In packaged Electron app (resources/binaries or resources/)
+    process.resourcesPath ? path.join(process.resourcesPath, 'binaries', name) : null,
+    process.resourcesPath ? path.join(process.resourcesPath, name) : null,
+    // In dev / project folder (binaries/, root, bin/)
+    path.join(__dirname, 'binaries', name),
+    path.join(__dirname, name),
+    path.join(__dirname, 'bin', name),
+    ...extraPaths
+  ].filter(Boolean);
 
-  const resourcesDir = app.isPackaged
-    ? path.join(process.resourcesPath, 'binaries')
-    : path.join(appDir, 'binaries');
-
-  const localCandidates = [
-    path.join(resourcesDir, name),
-    path.join(appDir, name),
-    path.join(appDir, 'bin', name),
-  ];
-
-  for (const p of localCandidates) {
+  for (const p of candidates) {
     if (fs.existsSync(p)) {
       console.log(`[Nimbo] Found ${name} at: ${p}`);
       return p;
     }
   }
 
-  // 2. Extra paths provided (e.g. old hardcoded locations)
-  for (const p of extraPaths) {
-    if (fs.existsSync(p)) {
-      console.log(`[Nimbo] Found ${name} at extra path: ${p}`);
-      return p;
-    }
-  }
-
-  // 3. System PATH (where / which)
+  // System PATH (where / which)
   try {
     const cmd = process.platform === 'win32' ? `where ${name}` : `which ${name}`;
     const result = execSync(cmd, { encoding: 'utf8', timeout: 5000 }).trim().split('\n')[0].trim();
@@ -75,8 +63,12 @@ const ffmpegExe = findBinary('ffmpeg.exe', [
 ]);
 const FFMPEG_DIR = ffmpegExe ? path.dirname(ffmpegExe) : null;
 
+// Discover Deno JS challenge solver
+const DENO_PATH = findBinary('deno.exe');
+
 console.log(`[Nimbo] yt-dlp: ${YT_DLP_PATH}`);
 console.log(`[Nimbo] ffmpeg dir: ${FFMPEG_DIR || 'not found (will use system)'}`);
+console.log(`[Nimbo] deno: ${DENO_PATH || 'not found (JS challenges solver inactive)'}`);
 
 let mainWindow = null;
 
@@ -297,6 +289,14 @@ function raceInfoFetch(url, clients, timeoutMs = 12000) {
         '--socket-timeout', '10',
       ];
 
+      if (DENO_PATH) {
+        args.push('--no-js-runtimes', '--js-runtimes', `deno:${DENO_PATH}`);
+      }
+
+      if (FFMPEG_DIR) {
+        args.push('--ffmpeg-location', FFMPEG_DIR);
+      }
+
       if (clientConfig !== 'default') {
         args.push('--extractor-args', `youtube:player_client=${clientConfig}`);
       }
@@ -372,7 +372,7 @@ function raceInfoFetch(url, clients, timeoutMs = 12000) {
 }
 
 // =============================================================================
-// Download Endpoint (v1.1.9 — correct flag order + watchdog + tree kill)
+// Download Endpoint (v1.2.2 — bundled binaries + Deno JS challenge solver)
 // =============================================================================
 expressApp.post('/api/download', (req, res) => {
   const { url, format, quality, audioBitrate, savePath } = req.body;
@@ -399,10 +399,15 @@ expressApp.post('/api/download', (req, res) => {
     '--fragment-retries', '10',
     '--retry-sleep', 'linear=1::2',
     '--socket-timeout', '30',
-    '--extractor-args', 'youtube:player_client=visionos,android;player_skip=configs',
+    '--extractor-args', 'youtube:player_client=visionos,mweb,android',
   ];
 
-  // ffmpeg location (if found)
+  // Deno JS challenge solver
+  if (DENO_PATH) {
+    args.push('--no-js-runtimes', '--js-runtimes', `deno:${DENO_PATH}`);
+  }
+
+  // ffmpeg location
   if (FFMPEG_DIR) {
     args.push('--ffmpeg-location', FFMPEG_DIR);
   }
